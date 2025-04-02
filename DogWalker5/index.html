@@ -1,0 +1,730 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Urban Skater</title>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #333; }
+        canvas { display: block; background-color: #87CEEB; }
+        #gameOver {
+            position: absolute; top: 50%; left: 50%; 
+            transform: translate(-50%, -50%); color: white; 
+            font-size: 40px; text-align: center; display: none;
+            font-family: Arial, sans-serif;
+            text-shadow: 2px 2px 4px #000;
+        }
+        #score {
+            position: absolute; top: 10px; left: 10px;
+            color: white; font-size: 20px;
+            font-family: Arial, sans-serif;
+            text-shadow: 2px 2px 4px #000;
+        }
+        #powerupTimer {
+            position: absolute; top: 10px; right: 10px;
+            color: #FFD700; font-size: 20px;
+            font-family: Arial, sans-serif;
+            text-shadow: 2px 2px 4px #000;
+            display: none;
+        }
+        #volumeControl {
+            position: absolute;
+            bottom: 10px;
+            left: 10px;
+            background: rgba(0,0,0,0.5);
+            padding: 5px;
+            border-radius: 5px;
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+
+        #volumeSlider {
+            width: 80px;
+        }
+
+        #volumeControl button {
+            background: #444;
+            color: white;
+            border: none;
+            width: 20px;
+            height: 20px;
+            border-radius: 3px;
+            cursor: pointer;
+        }
+    </style>
+</head>
+<body>
+    <div id="volumeControl">
+    <button id="volumeDown">-</button>
+    <input type="range" id="volumeSlider" min="0" max="1" step="0.1" value="0.5">
+    <button id="volumeUp">+</button>
+    <span id="volumeDisplay">50%</span>
+    </div>
+    <canvas id="gameCanvas"></canvas>
+    <div id="gameOver">GAME OVER<br>Press R to restart</div>
+    <div id="score">Score: 0</div>
+    <div id="powerupTimer"></div>
+
+    <audio id="bgMusic" loop src="ElMagicia.mp3"></audio>
+    <audio id="jumpSound" src="https://assets.mixkit.co/sfx/preview/mixkit-quick-jump-arcade-game-239.mp3"></audio>
+    <audio id="powerupSound" src="https://assets.mixkit.co/sfx/preview/mixkit-achievement-bell-600.mp3"></audio>
+    <audio id="collisionSound" src="https://assets.mixkit.co/sfx/preview/mixkit-retro-arcade-lose-2027.mp3"></audio>
+
+    <script>
+        // Game canvas setup
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        canvas.width = 800;
+        canvas.height = 400;
+
+        // Audio setup
+        const bgMusic = document.getElementById('bgMusic');
+        const jumpSound = document.getElementById('jumpSound');
+        const powerupSound = document.getElementById('powerupSound');
+        const collisionSound = document.getElementById('collisionSound');
+        bgMusic.volume = 0.9;
+        jumpSound.volume = 0.5;
+        // Volume control
+        let masterVolume = 0.5; // Default volume (50%)
+
+        // Get DOM elements
+        const volumeSlider = document.getElementById('volumeSlider');
+        const volumeDisplay = document.getElementById('volumeDisplay');
+        const volumeDown = document.getElementById('volumeDown');
+        const volumeUp = document.getElementById('volumeUp');
+
+        // Update all audio elements
+        function updateVolume() {
+            bgMusic.volume = masterVolume * 0.3; // Background music quieter
+            jumpSound.volume = masterVolume;
+            powerupSound.volume = masterVolume;
+            collisionSound.volume = masterVolume;
+            volumeDisplay.textContent = `${Math.round(masterVolume * 100)}%`;
+        }
+
+        // Event listeners
+        volumeSlider.addEventListener('input', (e) => {
+            masterVolume = parseFloat(e.target.value);
+            updateVolume();
+        });
+
+        volumeDown.addEventListener('click', () => {
+            masterVolume = Math.max(0, masterVolume - 0.1);
+            volumeSlider.value = masterVolume;
+            updateVolume();
+        });
+
+        volumeUp.addEventListener('click', () => {
+            masterVolume = Math.min(1, masterVolume + 0.1);
+            volumeSlider.value = masterVolume;
+            updateVolume();
+        });
+
+        // Initialize volume
+        updateVolume();
+        
+        // Game state
+        let gameRunning = true;
+        let score = 0;
+        let speed = 3;
+        let gravity = 1.25; // Reduced for floatier feel
+        let isBoosting = false;
+        let boostTimer = 0;
+        const maxBoostTime = 180;
+        let isFlying = false;
+        let flyBoost = 0;
+        const maxFlyBoost = 60;
+
+        // Power-Up System
+        let specialDog = null;
+        let powerupActive = false;
+        let powerupTimer = 0;
+        const powerupDuration = 300;
+        const originalWidth = 50;
+        const originalHeight = 80;
+
+        // Ramp System
+        let ramps = [];
+        const rampWidth = 150;
+        const rampHeight = 25;
+        const rampCurveHeight = 50;
+        let rampSpawnTimer = 0;
+        const rampSpawnRate = 400;
+
+        // Replace any existing skateboard image with:
+const skateboardImg = new Image();
+skateboardImg.src = 'skateboard.png'; // Your actual file
+
+        // Player character
+        const player = {
+            x: 150,
+            y:290,
+            width: originalWidth,
+            height: originalHeight,
+            frameWidth: 64,
+            frameHeight: 75,
+            frameX: 3 * 64,
+            frameY: 4,
+            speedY: 0,
+            jumping: false,
+            isDescending: false,
+            spriteSheet: new Image(),
+            frameCount: 0,
+            currentFrame: 3,
+            walkFrames: [3, 3, 1, 0],
+            totalFrames: 4,
+            skateboardOffset: 16,
+            skateboardWidth: 60,
+            skateboardHeight: 20,
+            originalSkateWidth: 60,  // Add these
+            originalSkateHeight: 20,
+            
+            init: function() {
+                this.spriteSheet.src = 'Charactervector2.png';
+                this.y =280;
+                this.speedY = 0;
+                this.jumping = false;
+                this.isDescending = false;
+                this.currentFrame = 3;
+                this.frameX = this.walkFrames[this.currentFrame] * this.frameWidth;
+                this.width = originalWidth;
+                this.height = originalHeight;
+            },
+            
+            update: function() {
+                // Flying logic
+                if (isFlying && this.y < 280) {
+                    this.speedY = -3;
+                    flyBoost--;
+                    this.isDescending = false;
+                    if (flyBoost <= 0) isFlying = false;
+                } 
+                // Descending detection
+                else if (this.speedY > 0 && this.y < 280) {
+                    this.isDescending = true;
+                }
+                // Normal gravity with reduced effect when falling
+                else if (this.y < 280) {
+                    this.speedY += (this.speedY > 0) ? gravity * 0.7 : gravity;
+                }
+                
+                // Apply movement
+                this.y += this.speedY;
+                
+                // Land on ground
+                if (this.y >= 280) {
+                    this.y = 280;
+                    this.jumping = false;
+                    this.isDescending = false;
+                }
+                
+                // Animation control
+                this.frameCount++;
+                const animSpeed = (isBoosting || isFlying) ? 5 : 10;
+                if (this.frameCount >= animSpeed) {
+                    this.frameCount = 0;
+                    this.currentFrame = (this.currentFrame + 1) % this.totalFrames;
+                    this.frameX = this.walkFrames[this.currentFrame] * this.frameWidth;
+                }
+                
+                // Skateboard bounce effect
+                this.skateboardOffset = 15 + Math.sin(this.frameCount * 0.2) * 2;
+            },
+            
+            draw: function() {
+                // Draw skateboard
+    if (skateboardImg.complete) {
+        ctx.drawImage(
+            skateboardImg,
+            this.x - 3,
+            this.y - this.skateboardOffset,
+            this.skateboardWidth,
+            this.skateboardHeight
+        );
+    } else {
+        // Fallback rectangle
+         ctx.fillStyle = '#8B4513';
+        ctx.fillRect(
+            this.x - 5,
+            this.y - this.skateboardOffset,
+            this.skateboardWidth,
+            this.skateboardHeight
+        );
+    }
+                const skateX = this.x - (this.skateboardWidth - this.width)/2;
+
+                // Draw character
+                if (!this.spriteSheet.complete) {
+                    ctx.fillStyle = isBoosting ? '#f1c40f' : 
+                                   isFlying ? '#9b59b6' : 
+                                   powerupActive ? '#FFD700' : '#3498db';
+                    ctx.fillRect(this.x, this.y - this.height, this.width, this.height);
+                    return;
+                }
+
+                ctx.save();
+                if (isBoosting) ctx.filter = "hue-rotate(90deg) brightness(1.2)";
+                if (isFlying) ctx.filter = "hue-rotate(220deg) brightness(1.3)";
+                if (powerupActive) ctx.filter = "brightness(1.5)";
+
+                ctx.drawImage(
+                    this.spriteSheet,
+                    this.frameX,
+                    this.frameY * this.frameHeight,
+                    this.frameWidth,
+                    this.frameHeight,
+                    this.x,
+                    this.y - this.height,
+                    this.width,
+                    this.height
+                );
+                ctx.restore();
+            },
+            
+            jump: function() {
+                if (!this.jumping) {
+                    this.speedY = -12;
+                    this.jumping = true;
+                    jumpSound.currentTime = 0;
+                    jumpSound.play();
+                }
+            }
+        };
+
+        // Dogs
+        const dogs = {
+            list: [],
+            sprite: new Image(),
+            width: 60,
+            height: 40,
+            spawnTimer: 0,
+            spawnRate: 50,
+            
+            init: function() {
+                this.list = [];
+                this.spawnTimer = 0;
+                this.sprite.src = 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 60"><rect x="10" y="30" width="80" height="20" rx="10" fill="%23b8860b"/><circle cx="25" cy="20" r="15" fill="%23b8860b"/><circle cx="70" cy="20" r="10" fill="%23b8860b"/><circle cx="20" cy="20" r="3" fill="%23000"/><circle cx="30" cy="20" r="3" fill="%23000"/></svg>';
+                
+                // Initialize special dog
+                specialDog = {
+                    x: canvas.width + 1500,
+                    y: 280,
+                    width: 60,
+                    height: 40,
+                    speed: 3,
+                    isFlashing: true,
+                    flashTimer: 0,
+                    flashInterval: 10,
+                    baseColor: '#b8860b',
+                    flashColor: '#FFFF00'
+                };
+            },
+            
+            update: function() {
+                // Spawn new dogs
+                this.spawnTimer++;
+                if (this.spawnTimer >= this.spawnRate) {
+                    this.spawnTimer = 0;
+                    this.list.push({
+                        x: canvas.width,
+                        y: 280,
+                        width: this.width,
+                        height: this.height,
+                        speed: speed + Math.random() * 2
+                    });
+                    
+                    // Increase difficulty
+                    if (score % 7 === 0 && this.spawnRate > 60) {
+                        this.spawnRate -= 4;
+                    }
+                }
+                
+                // Move dogs
+                for (let i = this.list.length - 1; i >= 0; i--) {
+                    this.list[i].x -= this.list[i].speed;
+                    
+                    // Remove off-screen dogs
+                    if (this.list[i].x + this.list[i].width < 0) {
+                        this.list.splice(i, 1);
+                        score++;
+                        document.getElementById('score').textContent = 'Score: ' + score;
+                    }
+                }
+                
+                // Update special dog
+                if (specialDog) {
+                    specialDog.x -= specialDog.speed;
+                    specialDog.flashTimer++;
+                    
+                    if (specialDog.flashTimer >= specialDog.flashInterval) {
+                        specialDog.flashTimer = 0;
+                        specialDog.isFlashing = !specialDog.isFlashing;
+                    }
+                    
+                    // Respawn when offscreen
+                    if (specialDog.x + specialDog.width < 0) {
+                        specialDog.x = canvas.width + Math.random() * 3000 + 2000;
+                    }
+                }
+                
+                // Powerup timer
+                if (powerupActive) {
+                    powerupTimer--;
+                    if (powerupTimer <= 0) {
+                        player.width = originalWidth;
+                        player.height = originalHeight;
+                        player.skateboardWidth = player.originalSkateWidth;  // Reset skateboard
+                        player.skateboardHeight = player.originalSkateHeight;
+                        powerupActive = false;
+                    }
+                }
+            },
+            
+            draw: function() {
+                // Draw regular dogs
+                for (let dog of this.list) {
+                    if (this.sprite.complete) {
+                        ctx.drawImage(this.sprite, dog.x, dog.y - this.height, this.width, this.height);
+                    } else {
+                        ctx.fillStyle = '#b8860b';
+                        ctx.fillRect(dog.x, dog.y - this.height, this.width, this.height);
+                    }
+                }
+                
+                // Draw special flashing dog
+                if (specialDog) {
+                    ctx.save();
+                    
+                    // Flashing effect
+                    const currentColor = specialDog.isFlashing 
+                        ? specialDog.flashColor 
+                        : specialDog.baseColor;
+                    
+                    // Body
+                    ctx.fillStyle = currentColor;
+                    ctx.beginPath();
+                    ctx.roundRect(
+                        specialDog.x, 
+                        specialDog.y - specialDog.height, 
+                        specialDog.width, 
+                        specialDog.height, 
+                        5
+                    );
+                    ctx.fill();
+                    
+                    // Eyes
+                    ctx.fillStyle = '#000';
+                    ctx.beginPath();
+                    ctx.arc(specialDog.x + 15, specialDog.y - specialDog.height + 10, 3, 0, Math.PI*2);
+                    ctx.arc(specialDog.x + 30, specialDog.y - specialDog.height + 10, 3, 0, Math.PI*2);
+                    ctx.fill();
+                    
+                    ctx.restore();
+                }
+            }
+        };
+
+        // Ramp functions
+        function createRamp() {
+            ramps.push({
+                x: canvas.width,
+                y: 225 - rampCurveHeight, // Start higher for upward curve
+                width: rampWidth,
+                height: rampCurveHeight, // Height matches curve
+                curvePeak: rampWidth * 1, // Where peak occurs
+                color: '#8B4513',
+                flatEdgeWidth: 30
+            });
+        }
+
+        // Background
+        const background = {
+            buildings: [],
+            sidewalk: { y: 280, height: 20 },
+            init: function() {
+                this.buildings = [];
+                for (let i = 0; i < 5; i++) {
+                    this.buildings.push({
+                        x: i * 300,
+                        width: 200 + Math.random() * 100,
+                        height: 100 + Math.random() * 150,
+                        color: `hsl(${Math.random() * 30 + 200}, 50%, ${Math.random() * 20 + 30}%)`
+                    });
+                }
+            },
+            update: function() {
+                for (let i = this.buildings.length - 1; i >= 0; i--) {
+                    this.buildings[i].x -= speed / 2;
+                    
+                    if (this.buildings[i].x + this.buildings[i].width < 0) {
+                        this.buildings.splice(i, 1);
+                        this.buildings.push({
+                            x: canvas.width,
+                            width: 200 + Math.random() * 100,
+                            height: 100 + Math.random() * 150,
+                            color: `hsl(${Math.random() * 30 + 200}, 50%, ${Math.random() * 20 + 30}%)`
+                        });
+                    }
+                }
+            },
+            draw: function() {
+                // Sky
+                ctx.fillStyle = '#87CEEB';
+                ctx.fillRect(0, 0, canvas.width, this.sidewalk.y);
+                
+                // Buildings
+                for (let building of this.buildings) {
+                    ctx.fillStyle = building.color;
+                    ctx.fillRect(building.x, this.sidewalk.y - building.height, building.width, building.height);
+                    
+                    // Windows
+                    ctx.fillStyle = 'rgba(255, 255, 255, 0.7)';
+                    const windowWidth = 15;
+                    const windowHeight = 20;
+                    const gap = 10;
+                    
+                    for (let y = this.sidewalk.y - building.height + 20; y < this.sidewalk.y - 20; y += windowHeight + gap) {
+                        for (let x = building.x + 10; x < building.x + building.width - 10; x += windowWidth + gap) {
+                            if (Math.random() > 0.3) {
+                                ctx.fillRect(x, y, windowWidth, windowHeight);
+                            }
+                        }
+                    }
+                }
+                
+                // Sidewalk
+                ctx.fillStyle = '#777';
+                ctx.fillRect(0, this.sidewalk.y, canvas.width, this.sidewalk.height);
+                
+                // Sidewalk lines
+                ctx.strokeStyle = '#999';
+                ctx.lineWidth = 2;
+                for (let x = 0; x < canvas.width; x += 30) {
+                    ctx.beginPath();
+                    ctx.moveTo(x, this.sidewalk.y + 5);
+                    ctx.lineTo(x + 15, this.sidewalk.y + 5);
+                    ctx.stroke();
+                }
+            }
+        };
+
+        // Initialize game
+        function initGame() {
+            gameRunning = true;
+            score = 0;
+            speed = 3;
+            isBoosting = false;
+            isFlying = false;
+            powerupActive = false;
+            document.getElementById('score').textContent = 'Score: 0';
+            document.getElementById('gameOver').style.display = 'none';
+            document.getElementById('powerupTimer').style.display = 'none';
+            
+            ramps = [];
+            rampSpawnTimer = 0;
+            player.init();
+            dogs.init();
+            background.init();
+            
+            bgMusic.currentTime = 0;
+            bgMusic.play();
+        }
+
+        // Check collisions
+        function checkCollisions() {
+            // Regular dogs
+            for (let dog of dogs.list) {
+                if (
+                    player.x < dog.x + dog.width &&
+                    player.x + player.width - 20 > dog.x &&
+                    player.y - player.height -20 < dog.y &&
+                    player.y > dog.y - dog.height
+                ) {
+                    gameRunning = false;
+                    document.getElementById('gameOver').style.display = 'block';
+                    collisionSound.currentTime = 0;
+                    collisionSound.play();
+                    break;
+                }
+            }
+            
+            // Special dog
+            if (specialDog && !powerupActive &&
+                player.x < specialDog.x + specialDog.width &&
+                player.x + player.width > specialDog.x &&
+                player.y - player.height < specialDog.y &&
+                player.y > specialDog.y - specialDog.height) {
+    
+                // Grow both character and skateboard
+                player.width = originalWidth * 2;
+                player.height = originalHeight * 2;
+                player.skateboardWidth = player.originalSkateWidth * 2;  // Grow skateboard
+                player.skateboardHeight = player.originalSkateHeight * 2;
+    
+                powerupActive = true;
+                powerupTimer = powerupDuration;
+                
+                document.getElementById('powerupTimer').style.display = 'block';
+                
+                // Respawn dog
+                specialDog.x = canvas.width + Math.random() * 3000 + 2000;
+                
+                powerupSound.currentTime = 0;
+                powerupSound.play();
+            }
+            
+            // Ramps
+            for (let i = ramps.length - 1; i >= 0; i--) {
+                const ramp = ramps[i];
+                const rampTop = ramp.y;
+                const rampBottom = rampTop + ramp.height;
+                
+                // Check if player is above the ramp's curve
+                if (player.x + player.width > ramp.x && 
+                    player.x < ramp.x + ramp.width &&
+                    player.y > rampTop && 
+                    player.y - player.height < rampBottom) {
+                    
+                    // Calculate launch angle based on ramp position
+                    const rampProgress = (player.x - ramp.x) / ramp.width;
+                    const launchForce = -15 * (1 - rampProgress); // Stronger at start
+                    
+                    player.speedY = launchForce;
+                    player.jumping = true;
+                    ramps.splice(i, 1);
+                    jumpSound.currentTime = 0;
+                    jumpSound.play();
+                    break;
+                }
+            }
+        }
+
+        // Game loop
+        function gameLoop() {
+            if (gameRunning) {
+                // Clear canvas
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                
+                // Handle boost timer
+                if (isBoosting) {
+                    boostTimer--;
+                    if (boostTimer <= 0) {
+                        isBoosting = false;
+                        speed = 3;
+                    }
+                }
+                
+                // Spawn ramps
+                rampSpawnTimer++;
+                if (rampSpawnTimer >= rampSpawnRate) {
+                    createRamp();
+                    rampSpawnTimer = 0;
+                }
+                
+                // Update all game objects
+                background.update();
+                player.update();
+                dogs.update();
+                
+                // Update ramps
+                for (let i = ramps.length - 1; i >= 0; i--) {
+                    ramps[i].x -= speed;
+                    if (ramps[i].x + ramps[i].width < 0) {
+                        ramps.splice(i, 1);
+                    }
+                }
+                
+                // Check collisions
+                checkCollisions();
+                
+                // Draw all game objects
+                background.draw();
+                
+                // Draw ramps (upward curve)
+                ctx.save();
+                ramps.forEach(ramp => {
+                    // Base
+                    ctx.fillStyle = ramp.color;
+                    ctx.fillRect(ramp.x, ramp.y + ramp.height - 5, ramp.width, 5);
+                    
+                    // Upward curve
+                    ctx.beginPath();
+                    ctx.moveTo(ramp.x, ramp.y + ramp.height);
+                    ctx.quadraticCurveTo(
+                        ramp.x + ramp.curvePeak, 
+                        ramp.y, 
+                        ramp.x + ramp.width, 
+                        ramp.y + ramp.height
+                    );
+                    ctx.lineTo(ramp.x + ramp.width, ramp.y + ramp.height + 5);
+                    ctx.lineTo(ramp.x, ramp.y + ramp.height + 5);
+                    ctx.closePath();
+                    ctx.fill();
+                    
+                    // Wood grain
+                    ctx.strokeStyle = 'rgba(0,0,0,0.2)';
+                    ctx.lineWidth = 1;
+                    for (let x = ramp.x; x < ramp.x + ramp.width; x += 20) {
+                        ctx.beginPath();
+                        ctx.moveTo(x, ramp.y + ramp.height);
+                        ctx.lineTo(x + 10, ramp.y + ramp.height - 10);
+                        ctx.stroke();
+                    }
+                });
+                ctx.restore();
+                
+                // Draw other elements
+                dogs.draw();
+                player.draw();
+                
+                // Powerup timer
+                if (powerupActive) {
+                    const timeLeft = Math.ceil(powerupTimer/60);
+                    document.getElementById('powerupTimer').textContent = `POWER: ${timeLeft}s`;
+                }
+            }
+            
+            requestAnimationFrame(gameLoop);
+        }
+
+        // Event listeners
+        document.addEventListener('keydown', function(e) {
+            if (!gameRunning) {
+                if (e.key.toLowerCase() === 'r') initGame();
+                return;
+            }
+            
+            if (e.code === 'Space') {
+                player.jump();
+            } 
+            else if (e.key === 'ArrowRight' && !isBoosting) {
+                isBoosting = true;
+                speed = 6;
+                boostTimer = maxBoostTime;
+            }
+            else if (e.key === 'ArrowUp' && player.jumping && !isFlying) {
+                isFlying = true;
+                flyBoost = maxFlyBoost;
+            }
+        });
+
+        document.addEventListener('keyup', function(e) {
+            if (e.key === 'ArrowUp' && isFlying) {
+                isFlying = false;
+            }
+        });
+
+        // Touch support
+        canvas.addEventListener('touchstart', function() {
+            if (gameRunning) {
+                player.jump();
+            } else {
+                initGame();
+            }
+        });
+
+        // Start the game
+        initGame();
+        gameLoop();
+    </script>
+</body>
+</html>
